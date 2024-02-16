@@ -8,7 +8,7 @@ int16_t gx, gy, gz;
 
 const uint SLASH_COOLDOWN = 500;
 const int16_t DIRECTION_CHANGE_THRESHOLD = 50;
-const int DEBOUNCE_THRESHOLD = 50;
+const int DEBOUNCE_THRESHOLD = 25;
 int slash_count = 0;
 
 ulong last_slash = 0;
