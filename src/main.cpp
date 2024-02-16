@@ -4,6 +4,7 @@
 #include "esp_now.h"
 #include "WiFi.h"
 
+#define BUTTON_PIN 19
 
 MPU6050 mpu;
 int16_t ax, ay, az;
@@ -26,7 +27,7 @@ esp_now_peer_info_t peerInfo;
 // Define a data structure
 typedef struct struct_message {
   uint8_t swordNumber;
-  char direction;
+  char orientation;
   uint8_t action;
 } struct_message;
 
@@ -74,36 +75,36 @@ void debounce(int now) {
   }
 }
 
-void slash(char direction) {
-    Serial.printf("%c %d\n", direction, slash_count++);
+void slash(char orientation) {
+    Serial.printf("%c %d\n", orientation, slash_count++);
     last_slash = millis();
 
     myData.action = 1;
-    myData.direction = direction;
+    myData.orientation = orientation;
 
     esp_err_t result = esp_now_send(serverAddress, (uint8_t *) &myData, sizeof(myData));
 }
 
 void checkSlash() {
 
-  char slashDirection;
+  char slashOrientation;
 
   if (direction == TIP_UP) {
-    slashDirection = 'v';
+    slashOrientation = 'v';
   } else if (direction == TIP_DOWN) {
-    slashDirection = 'v';
+    slashOrientation = 'v';
   } else if (direction == HAND_UP) {
-    slashDirection = 'h';
+    slashOrientation = 'h';
   } else if (direction == HAND_DOWN) {
-    slashDirection = 'h';
+    slashOrientation = 'h';
   } else if (direction == TIP_F_NORMAL) {
-    slashDirection = 'v';
+    slashOrientation = 'v';
   } else if (direction == TIP_F_TWIST) {
-    slashDirection = 'v';
+    slashOrientation = 'v';
   }
 
   if ((millis() - last_slash > SLASH_COOLDOWN) && gz == 127) {
-    slash(slashDirection);
+    slash(slashOrientation);
   }
 }
 
@@ -168,7 +169,6 @@ void loop() {
     debounce(TIP_UP);
   } else if (ay < -DIRECTION_CHANGE_THRESHOLD) {
     debounce(TIP_DOWN);
-
   } else if (ax > DIRECTION_CHANGE_THRESHOLD) {
     debounce(TIP_F_NORMAL);
   } else if (ax < -DIRECTION_CHANGE_THRESHOLD) {
