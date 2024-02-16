@@ -1,94 +1,114 @@
-
-#include "Wire.h"
 #include "I2Cdev.h"
 #include "MPU6050.h"
+#include "Wire.h"
 
 MPU6050 mpu;
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
 
-uint8_t sword_state = 0; // 0 = Sword Up, 1 = Slashed
-uint slash_count = 0;
-
 const uint SLASH_COOLDOWN = 500;
-const uint PRINT_INTERVAL = 500;
+const int16_t DIRECTION_CHANGE_THRESHOLD = 50;
+const int DEBOUNCE_THRESHOLD = 25;
+int slash_count = 0;
 
-ulong last_print = 0;
 ulong last_slash = 0;
+ulong last_change_direction = 0;
 
-enum Direction
-{
-    UP,
-    DOWN,
-    LEFT,
-    RIGHT,
+enum SwordStates {
+  TIP_UP,
+  TIP_DOWN,
+  HAND_UP,
+  HAND_DOWN,
+  TIP_F_NORMAL,
+  TIP_F_TWIST,
 };
 
-const String DIRECTIONS[] = {
-    "UP",
-    "DOWN",
-    "LEFT",
-    "RIGHT",
+const String SWORD_STATES[] = {
+    "TIP_UP",
+    "TIP_DOWN",
+    "HAND_UP",
+    "HAND_DOWN",
+    "TIP_F_NORMAL",
+    "TIP_F_TWIST",
 };
 
-Direction next_slash_direction = UP;
+int direction = -1;
+int direction_last = -1;
+int direction_debounce = 0;
 
-void setup()
-{
-    Serial.begin(9600);
-    Wire.begin();
-    mpu.initialize();
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu.initialize();
 }
 
-void loop()
-{
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+void debounce(int now) {
+  if (now == direction_last) {
+    direction_debounce++;
+  } else {
+    direction_debounce = 1;
+    direction_last = now;
+  }
 
-    ax = min(17000, max(-17000, (int)ax));
-    ay = min(17000, max(-17000, (int)ay));
-    az = min(17000, max(-17000, (int)az));
+  if (direction_debounce == DEBOUNCE_THRESHOLD) {
+    direction = now;
+  }
+}
 
-    ax = map(ax, -17000, 17000, -127, 127);
-    ay = map(ay, -17000, 17000, -127, 127);
-    az = map(az, -17000, 17000, -127, 127);
+void checkSlashDirection() {
+  String slashType;
 
-    gx = map(gx, -32768, 32767, -127, 127);
-    gy = map(gy, -32768, 32767, -127, 127);
-    gz = map(gz, -32768, 32767, -127, 127);
+  if (direction == TIP_UP) {
+    slashType = "vertical";
+  } else if (direction == TIP_DOWN) {
+    slashType = "vertical";
+  } else if (direction == HAND_UP) {
+    slashType = "horizontal";
+  } else if (direction == HAND_DOWN) {
+    slashType = "horizontal";
+  } else if (direction == TIP_F_NORMAL) {
+    slashType = "vertical";
+  } else if (direction == TIP_F_TWIST) {
+    slashType = "vertical";
+  }
 
-    if (gz == 127)
-    {
-        if (sword_state == 1)
-            return;
+  ulong now = millis();
 
-        Serial.printf("%s Slash %d\n", DIRECTIONS[next_slash_direction], slash_count);
+  if ((now - last_slash > SLASH_COOLDOWN) && gz == 127) {
+    Serial.printf("%s %d\n", slashType, slash_count++);
+    last_slash = now;
+  }
+}
 
-        Serial.printf("ax: %d, ay: %d, az: %d\n", ax, ay, az);
-        Serial.printf("gx: %d, gy: %d, gz: %d\n", gx, gy, gz);
+void loop() {
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-        last_slash = millis();
-        slash_count += 1;
-        sword_state = 1;
-    }
-    else
-    {
-        sword_state = 0;
+  ax = constrain(ax, -17000, 17000);
+  ay = constrain(ay, -17000, 17000);
+  az = constrain(az, -17000, 17000);
 
-        if (abs(ay) > abs(az))
-        {
-            if (ay > 60)
-                next_slash_direction = DOWN;
-            else if (ay < -60)
-                next_slash_direction = UP;
-        }
-        else
-        {
-            if (az > 60)
-                next_slash_direction = RIGHT;
-            else if (az < -60)
-                next_slash_direction = LEFT;
-        }
+  ax = map(ax, -17000, 17000, -127, 127);
+  ay = map(ay, -17000, 17000, -127, 127);
+  az = map(az, -17000, 17000, -127, 127);
 
-        Serial.printf("%s ax: %d, ay: %d, az: %d, gx: %d, gy: %d, gz: %d\n", DIRECTIONS[next_slash_direction], ax, ay, az, gx, gy, gz);
-    }
+  gx = map(gx, -32768, 32767, -127, 127);
+  gy = map(gy, -32768, 32767, -127, 127);
+  gz = map(gz, -32768, 32767, -127, 127);
+
+  if (az > DIRECTION_CHANGE_THRESHOLD) {
+    debounce(HAND_UP);
+  } else if (az < -DIRECTION_CHANGE_THRESHOLD) {
+    debounce(HAND_DOWN);
+  } else if (ay > DIRECTION_CHANGE_THRESHOLD) {
+    debounce(TIP_UP);
+  } else if (ay < -DIRECTION_CHANGE_THRESHOLD) {
+    debounce(TIP_DOWN);
+
+  } else if (ax > DIRECTION_CHANGE_THRESHOLD) {
+    debounce(TIP_F_NORMAL);
+  } else if (ax < -DIRECTION_CHANGE_THRESHOLD) {
+    debounce(TIP_F_TWIST);
+  }
+
+  checkSlashDirection();
 }
