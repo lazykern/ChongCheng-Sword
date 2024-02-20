@@ -18,6 +18,9 @@ int slash_count = 0;
 
 ulong last_slash = 0;
 ulong last_change_direction = 0;
+bool blocking = false;
+char currentOrientation = 'v';
+char lastOrientation = 'v';
 
 // 3C:61:05:03:68:74
 uint8_t serverAddress[] = {0x3C, 0x61, 0x05, 0x03, 0x68, 0x74};
@@ -25,7 +28,8 @@ uint8_t serverAddress[] = {0x3C, 0x61, 0x05, 0x03, 0x68, 0x74};
 esp_now_peer_info_t peerInfo;
 
 // Define a data structure
-typedef struct struct_message {
+typedef struct struct_message
+{
   uint8_t swordNumber;
   char orientation;
   uint8_t action;
@@ -34,8 +38,8 @@ typedef struct struct_message {
 // Create a structured object
 struct_message myData;
 
-
-enum SwordStates {
+enum SwordStates
+{
   TIP_UP,
   TIP_DOWN,
   HAND_UP,
@@ -57,91 +61,167 @@ int direction = -1;
 int direction_last = -1;
 int direction_debounce = 0;
 
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+{
   Serial.print("\r\nLast Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
-void debounce(int now) {
-  if (now == direction_last) {
+void debounce(int now)
+{
+  if (now == direction_last)
+  {
     direction_debounce++;
-  } else {
+  }
+  else
+  {
     direction_debounce = 1;
     direction_last = now;
   }
 
-  if (direction_debounce == DEBOUNCE_THRESHOLD) {
+  if (direction_debounce == DEBOUNCE_THRESHOLD)
+  {
     direction = now;
   }
 }
 
-void slash(char orientation) {
-    Serial.printf("%c %d\n", orientation, slash_count++);
-    last_slash = millis();
-
-    myData.action = 1;
-    myData.orientation = orientation;
-
-    esp_err_t result = esp_now_send(serverAddress, (uint8_t *) &myData, sizeof(myData));
-}
-
-void checkSlash() {
-
-  char slashOrientation;
-
-  if (direction == TIP_UP) {
-    slashOrientation = 'v';
-  } else if (direction == TIP_DOWN) {
-    slashOrientation = 'v';
-  } else if (direction == HAND_UP) {
-    slashOrientation = 'h';
-  } else if (direction == HAND_DOWN) {
-    slashOrientation = 'h';
-  } else if (direction == TIP_F_NORMAL) {
-    slashOrientation = 'v';
-  } else if (direction == TIP_F_TWIST) {
-    slashOrientation = 'v';
+void updateDirection()
+{
+  if (az > DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(HAND_UP);
   }
-
-  if ((millis() - last_slash > SLASH_COOLDOWN) && gz == 127) {
-    slash(slashOrientation);
+  else if (az < -DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(HAND_DOWN);
+  }
+  else if (ay > DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(TIP_UP);
+  }
+  else if (ay < -DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(TIP_DOWN);
+  }
+  else if (ax > DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(TIP_F_NORMAL);
+  }
+  else if (ax < -DIRECTION_CHANGE_THRESHOLD)
+  {
+    debounce(TIP_F_TWIST);
   }
 }
 
-void setup() {
+void slash(char orientation)
+{
+  Serial.printf("%c %d\n", orientation, slash_count++);
+  last_slash = millis();
+
+  myData.action = 1;
+  myData.orientation = orientation;
+
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+}
+
+void updateOrientation()
+{
+  if (direction == TIP_UP)
+  {
+    currentOrientation = 'v';
+  }
+  else if (direction == TIP_DOWN)
+  {
+    currentOrientation = 'v';
+  }
+  else if (direction == HAND_UP)
+  {
+    currentOrientation = 'h';
+  }
+  else if (direction == HAND_DOWN)
+  {
+    currentOrientation = 'h';
+  }
+  else if (direction == TIP_F_NORMAL)
+  {
+    currentOrientation = 'v';
+  }
+  else if (direction == TIP_F_TWIST)
+  {
+    currentOrientation = 'v';
+  }
+}
+
+void checkSlash()
+{
+  if ((millis() - last_slash > SLASH_COOLDOWN) && gz == 127)
+  {
+    slash(currentOrientation);
+  }
+}
+
+void block()
+{
+  blocking = true;
+  Serial.printf("Blocking %c\n", currentOrientation);
+  myData.action = 2;
+  myData.orientation = currentOrientation;
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+}
+
+void unblock()
+{
+  blocking = false;
+  Serial.printf("Unblocking %c\n", currentOrientation);
+  myData.action = 0;
+  myData.orientation = currentOrientation;
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+}
+
+void setup()
+{
   Serial.begin(9600);
   Wire.begin();
   mpu.initialize();
 
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
   WiFi.mode(WIFI_STA);
 
-  if (esp_now_init() != ESP_OK) {
+  if (esp_now_init() != ESP_OK)
+  {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
 
   esp_now_register_send_cb(OnDataSent);
-  
+
   memcpy(peerInfo.peer_addr, serverAddress, 6);
-  peerInfo.channel = 0;  
+  peerInfo.channel = 0;
   peerInfo.encrypt = false;
-  
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK)
+  {
     Serial.println("Failed to add peer");
     return;
   }
 
-  if (WiFi.macAddress().equalsIgnoreCase("E8:68:E7:22:B6:B8")) {
+  if (WiFi.macAddress().equalsIgnoreCase("E8:68:E7:22:B6:B8"))
+  {
     myData.swordNumber = 1;
-  } else if (WiFi.macAddress().equalsIgnoreCase("")) {
+  }
+  else if (WiFi.macAddress().equalsIgnoreCase(""))
+  {
     myData.swordNumber = 2;
-  } else {
+  }
+  else
+  {
     myData.swordNumber = UINT8_MAX;
   }
-  
 }
 
-void getMotion() {
+void getMotion()
+{
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
   ax = constrain(ax, -17000, 17000);
@@ -157,23 +237,33 @@ void getMotion() {
   gz = map(gz, -32768, 32767, -127, 127);
 }
 
-void loop() {
+void loop()
+{
 
   getMotion();
 
-  if (az > DIRECTION_CHANGE_THRESHOLD) {
-    debounce(HAND_UP);
-  } else if (az < -DIRECTION_CHANGE_THRESHOLD) {
-    debounce(HAND_DOWN);
-  } else if (ay > DIRECTION_CHANGE_THRESHOLD) {
-    debounce(TIP_UP);
-  } else if (ay < -DIRECTION_CHANGE_THRESHOLD) {
-    debounce(TIP_DOWN);
-  } else if (ax > DIRECTION_CHANGE_THRESHOLD) {
-    debounce(TIP_F_NORMAL);
-  } else if (ax < -DIRECTION_CHANGE_THRESHOLD) {
-    debounce(TIP_F_TWIST);
-  }
+  updateDirection();
 
-  checkSlash();
+  lastOrientation = currentOrientation;
+
+  updateOrientation();
+
+  if (digitalRead(BUTTON_PIN) == LOW)
+  {
+
+    if (!blocking || (blocking && lastOrientation != currentOrientation))
+    {
+      block();
+    }
+  }
+  else
+  {
+
+    if (blocking)
+    {
+      unblock();
+    }
+
+    checkSlash();
+  }
 }
