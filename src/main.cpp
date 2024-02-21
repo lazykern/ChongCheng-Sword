@@ -5,6 +5,7 @@
 #include "WiFi.h"
 
 #define BUTTON_PIN 19
+#define BUZZER_PIN 34
 
 MPU6050 mpu;
 int16_t ax, ay, az;
@@ -35,8 +36,17 @@ typedef struct struct_message
   uint8_t action;
 } struct_message;
 
+typedef struct struct_game {
+  uint8_t gameStage;      // 0: waiting, 1: playing, 2: wined
+  uint8_t playerNumber;   // 1: player1, 2: player2, 0: default
+  uint8_t action;         // 1: block, 2: hit(lost blood), 0: default
+  int player1health;
+  int player2health;
+} struct_game;
+
 // Create a structured object
-struct_message myData;
+struct_message swordData;
+struct_game gameData;
 
 enum SwordStates
 {
@@ -66,6 +76,33 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
   Serial.print("\r\nLast Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&gameData, incomingData, sizeof(gameData));
+  Serial.print("Bytes received: ");
+  Serial.println(len);
+  Serial.print("Game Stage: ");
+  Serial.println(gameData.gameStage);
+  Serial.print("Player Number: ");
+  Serial.println(gameData.playerNumber);
+  Serial.print("Action: ");
+  Serial.println(gameData.action);
+  Serial.print("Player 1 Health: ");
+  Serial.println(gameData.player1health);
+  Serial.print("Player 2 Health: ");
+  Serial.println(gameData.player2health);
+
+  if (gameData.playerNumber == 0) {
+    return;
+  }
+
+  if (gameData.playerNumber != swordData.swordNumber) {
+    // TODO
+  } else {
+
+  }
+}
+
 
 void debounce(int now)
 {
@@ -118,10 +155,10 @@ void slash(char orientation)
   Serial.printf("%c %d\n", orientation, slash_count++);
   last_slash = millis();
 
-  myData.action = 1;
-  myData.orientation = orientation;
+  swordData.action = 1;
+  swordData.orientation = orientation;
 
-  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&swordData, sizeof(swordData));
 }
 
 void updateOrientation()
@@ -164,22 +201,39 @@ void block()
 {
   blocking = true;
   Serial.printf("Blocking %c\n", currentOrientation);
-  myData.action = 2;
-  myData.orientation = currentOrientation;
-  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+  swordData.action = 2;
+  swordData.orientation = currentOrientation;
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&swordData, sizeof(swordData));
 }
 
 void unblock()
 {
   blocking = false;
   Serial.printf("Unblocking %c\n", currentOrientation);
-  myData.action = 0;
-  myData.orientation = currentOrientation;
-  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&myData, sizeof(myData));
+  swordData.action = 0;
+  swordData.orientation = currentOrientation;
+  esp_err_t result = esp_now_send(serverAddress, (uint8_t *)&swordData, sizeof(swordData));
 }
 
 void setup()
 {
+
+  Serial.println(WiFi.macAddress());
+
+  if (WiFi.macAddress().equalsIgnoreCase("E8:68:E7:22:B6:B8"))
+  {
+    swordData.swordNumber = 1;
+  }
+  else if (WiFi.macAddress().equalsIgnoreCase("24:6F:28:D1:F2:34"))
+  {
+    swordData.swordNumber = 2;
+  }
+  else
+  {
+    swordData.swordNumber = UINT8_MAX;
+    return;
+  }
+
   Serial.begin(9600);
   Wire.begin();
   mpu.initialize();
@@ -194,6 +248,8 @@ void setup()
     return;
   }
 
+  esp_now_register_recv_cb(OnDataRecv);
+
   esp_now_register_send_cb(OnDataSent);
 
   memcpy(peerInfo.peer_addr, serverAddress, 6);
@@ -206,18 +262,6 @@ void setup()
     return;
   }
 
-  if (WiFi.macAddress().equalsIgnoreCase("E8:68:E7:22:B6:B8"))
-  {
-    myData.swordNumber = 1;
-  }
-  else if (WiFi.macAddress().equalsIgnoreCase(""))
-  {
-    myData.swordNumber = 2;
-  }
-  else
-  {
-    myData.swordNumber = UINT8_MAX;
-  }
 }
 
 void getMotion()
@@ -240,6 +284,11 @@ void getMotion()
 void loop()
 {
 
+  if (swordData.swordNumber == UINT8_MAX) {
+    Serial.println("Invalid sword number");
+    return;
+  }
+
   getMotion();
 
   updateDirection();
@@ -251,13 +300,18 @@ void loop()
   if (digitalRead(BUTTON_PIN) == LOW)
   {
 
+    // digitalWrite(BUZZER_PIN, HIGH);
+
     if (!blocking || (blocking && lastOrientation != currentOrientation))
     {
       block();
     }
+  
   }
   else
   {
+
+    // digitalWrite(BUZZER_PIN, LOW);
 
     if (blocking)
     {
