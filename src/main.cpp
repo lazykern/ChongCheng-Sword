@@ -4,7 +4,6 @@
 #include "esp_now.h"
 #include "WiFi.h"
 #include "pitches.h"
-#include <ArduinoQueue.h>
 
 #define BUTTON_PIN 19
 #define BUZZER_PIN 18
@@ -53,6 +52,8 @@ typedef struct struct_game
 // Create a structured object
 struct_message swordData;
 struct_game gameData;
+
+bool stage2BuzzerPlayed = false;
 
 enum SwordStates
 {
@@ -143,11 +144,26 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
   memcpy(&gameData, incomingData, sizeof(gameData));
 
+  if (gameData.gameStage == 2)
+  {
+    bool thisPlayerWon = false;
+    if (!stage2BuzzerPlayed && 
+       ((swordData.swordNumber == 1 && gameData.player1health > 0) ||
+       (swordData.swordNumber == 2 && gameData.player2health > 0)))
+    {
+      buzzer(NOTE_A6, 1000);
+      stage2BuzzerPlayed = true;
+    }
+    return;
+  };
+
   if (gameData.gameStage != 1)
   {
     setRGB(0, 0, 0);
     return;
   }
+
+  stage2BuzzerPlayed = false;
 
   if (swordData.swordNumber == 1)
   {
@@ -168,7 +184,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
     // Another player blocked
     if (gameData.action == 1)
     {
-      buzzer(NOTE_D1, 300);
+      buzzer(NOTE_G1, 300);
     }
     // Another player got hit
     else if (gameData.action == 2)
@@ -181,12 +197,12 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
     // This player blocked
     if (gameData.action == 1)
     {
-      buzzer(NOTE_F6, 300);
+      buzzer(NOTE_C5, 300);
     }
     // This player got hit
     else if (gameData.action == 2)
     {
-      buzzer(NOTE_D1, 300);
+      buzzer(NOTE_G1, 300);
     }
   }
 }
